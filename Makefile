@@ -1,16 +1,17 @@
 CC = gcc
 CFLAGS = -Wall -Wextra
-OBJ = stnc.o
+LDFLAGS = -lcrypto
+OBJ = stnc.o stnc2.o
 
 default: all
 
-all: stnc
+all: stnc2
 
-stnc: $(OBJ)
-	$(CC) $(CFLAGS) -o stnc $(OBJ)
+stnc2: stnc2.o
+	$(CC) $(CFLAGS) -o stnc2 stnc2.o $(LDFLAGS)
 
-stnc.o: stnc.c stnc.h
-	$(CC) $(CFLAGS) -c stnc.c
+stnc2.o: stnc2.c stnc2.h
+	$(CC) $(CFLAGS) -c stnc2.c
 
 clean:
-	rm -f stnc $(OBJ)
+	rm -f stnc2 stnc2.o
