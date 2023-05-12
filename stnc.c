@@ -17,20 +17,52 @@
 #include <errno.h>
 #include <openssl/sha.h>
 
+#define SHM_FILE "/FileSM"
+#define SHM_FILE_NAME "/FileName"
+#define SHM_FILE_CS "/FileCS"
+#define BUF_SIZE 64000
+#define TCP_BUF_SIZE 1000000
+#define FIFO_NAME "/tmp/myfifo"
+#define DATA_SIZE 100000000
+#define SOCKET_PATH "/tmp/my_socket.sock"
+#define SERVER_SOCKET_PATH "/tmp/uds_dgram_server"
+#define CLIENT_SOCKET_PATH "/tmp/uds_dgram_client"
 enum addr
 {
     IPV4,
     IPV6
 };
-#define DATA_SIZE 100000000
-#define BUF_SIZE 64000
-#define TCP_BUF_SIZE 1000000
 
+// main functions
+// int client(int argc, char *argv[]);
+int server(int argc, char *argv[]);
+int init_tcp_client(int argc, char *argv[], enum addr type);
+int tcp_server(int argc, char *argv[], enum addr type);
+int init_udp_client(int argc, char *argv[], enum addr type);
+int init_udp_server(int argc, char *argv[], enum addr type);
+int uds_stream_client(int argc, char *argv[]);
+int uds_stream_server(int argc, char *argv[]);
+int uds_dgram_client(int argc, char *argv[]);
+int uds_dgram_server(int argc, char *argv[]);
+int mmap_client(int argc, char *argv[]);
+int mmap_server(int argc, char *argv[]);
+int pipe_client(int argc, char *argv[]);
+int pipe_server(int argc, char *argv[]);
 void printUsage();
 void handleClient(int argc, char *argv[]);
 void handleServer(int argc, char *argv[]);
 int init_client(int argc, char *argv[]);
-int udp_client(int argc, char *argv[], enum addr type);
+void send_checksum(char *data, int sock);
+char *generate_data(size_t size);
+int receive_checksum(int serverSocket, enum addr type, unsigned char *recv_hash);
+int bind_udp_server_socket(int serverSocket, enum addr type, const char *port);
+int create_udp_server_socket(int argc, char *argv[], enum addr type);
+
+// aid functions
+char *getServerType(int argc, char *argv[]);
+int send_type_to_server(int argc, char *argv[], char *type);
+char *generate_rand_str(int length);
+int min(int a, int b);
 
 int main(int argc, char *argv[])
 {
@@ -415,5 +447,230 @@ int init_udp_client(int argc, char *argv[], enum addr type)
     // Close socket
     close(sock);
     free(data);
+    return 0;
+}
+
+// ######################### udp server #########################
+
+int create_udp_server_socket(int argc, char *argv[], enum addr type)
+{
+    struct sockaddr_in serverAddr, clientAddr;
+    struct sockaddr_in6 serverAddr6, clientAddr6;
+    socklen_t clientAddressLen;
+    int serverSocket;
+
+    if (type == IPV4)
+    {
+        // Create server socket
+        if ((serverSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
+        {
+            perror("Socket creation error");
+            return -1;
+        }
+
+        memset(&serverAddr, 0, sizeof(serverAddr));
+        memset(&clientAddr, 0, sizeof(clientAddr));
+
+        // Set socket address
+        serverAddr.sin_family = AF_INET;
+        serverAddr.sin_addr.s_addr = INADDR_ANY;
+        serverAddr.sin_port = htons(atoi(argv[2]));
+
+        // Bind socket to address
+        if (bind(serverSocket, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) == -1)
+        {
+            perror("Bind failed");
+            return -1;
+        }
+    }
+    else if (type == IPV6)
+    {
+        // Create server socket
+        if ((serverSocket = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP)) == -1)
+        {
+            perror("Socket creation error");
+            return -1;
+        }
+
+        memset(&serverAddr6, 0, sizeof(serverAddr6));
+        memset(&clientAddr6, 0, sizeof(clientAddr6));
+
+        // Set socket address
+        serverAddr6.sin6_family = AF_INET6;
+        serverAddr6.sin6_addr = in6addr_any;
+        serverAddr6.sin6_port = htons(atoi(argv[2]));
+
+        // Bind socket to address
+        if (bind(serverSocket, (struct sockaddr *)&serverAddr6, sizeof(serverAddr6)) == -1)
+        {
+            perror("Bind failed");
+            return -1;
+        }
+    }
+    else
+    {
+        printf("Invalid address type\n");
+        return -1;
+    }
+
+    return serverSocket;
+}
+
+int bind_udp_server_socket(int serverSocket, enum addr type, const char *port)
+{
+    struct sockaddr_in serverAddr;
+    struct sockaddr_in6 serverAddr6;
+
+    if (type == IPV4)
+    {
+        memset(&serverAddr, 0, sizeof(serverAddr));
+        serverAddr.sin_family = AF_INET;
+        serverAddr.sin_addr.s_addr = INADDR_ANY;
+        serverAddr.sin_port = htons(atoi(port));
+
+        if (bind(serverSocket, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) < 0)
+        {
+            printf("\nBind failed\n");
+            return -1;
+        }
+    }
+    else if (type == IPV6)
+    {
+        memset(&serverAddr6, 0, sizeof(serverAddr6));
+        serverAddr6.sin6_family = AF_INET6;
+        serverAddr6.sin6_addr = in6addr_any;
+        serverAddr6.sin6_port = htons(atoi(port));
+
+        if (bind(serverSocket, (struct sockaddr *)&serverAddr6, sizeof(serverAddr6)) < 0)
+        {
+            printf("\nBind failed\n");
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+int receive_checksum(int serverSocket, enum addr type, unsigned char *recv_hash)
+{
+    struct sockaddr_in clientAddr;
+    struct sockaddr_in6 clientAddr6;
+    socklen_t clientAddressLen;
+
+    char hash_str[SHA_DIGEST_LENGTH * 2 + 1];
+    int bytes;
+
+    if (type == IPV4)
+    {
+        bytes = recvfrom(serverSocket, hash_str, sizeof(hash_str), 0, (struct sockaddr *)&clientAddr, &clientAddressLen);
+    }
+    else if (type == IPV6)
+    {
+        bytes = recvfrom(serverSocket, hash_str, sizeof(hash_str), 0, (struct sockaddr *)&clientAddr6, &clientAddressLen);
+    }
+
+    if (bytes < 0)
+    {
+        printf("recv failed. Sender inactive.\n");
+        return -1;
+    }
+
+    for (int i = 0; i < SHA_DIGEST_LENGTH; i++)
+    {
+        sscanf(&hash_str[i * 2], "%2hhx", &recv_hash[i]);
+    }
+
+    return 0;
+}
+
+int init_udp_server(int argc, char *argv[], enum addr type)
+{
+    struct timeval start, end;
+    int serverSocket;
+    socklen_t clientAddressLen;
+    struct sockaddr_in serverAddr, clientAddr;
+    struct sockaddr_in6 serverAddr6, clientAddr6;
+    int bytes = 0, countbytes = 0;
+    char buffer[BUF_SIZE] = {0}, decoded[BUF_SIZE], *totalData = malloc(DATA_SIZE);
+    serverSocket = create_udp_server_socket(argc, argv, type);
+    if (serverSocket < 0)
+    {
+        printf("\nSocket creation error\n");
+        return -1;
+    }
+
+    if (bind_udp_server_socket(serverSocket, type, argv[2]) < 0)
+    {
+        close(serverSocket);
+        return -1;
+    }
+
+    unsigned char recv_hash[SHA_DIGEST_LENGTH];
+    if (receive_checksum(serverSocket, type, recv_hash) < 0)
+    {
+        close(serverSocket);
+        return -1;
+    }
+
+    gettimeofday(&start, NULL);
+
+    while (1)
+    {
+        if (type == IPV4)
+        {
+            bytes = recvfrom(serverSocket, buffer, sizeof(buffer), 0, (struct sockaddr *)&clientAddr, &clientAddressLen);
+        }
+        else if (type == IPV6)
+        {
+            bytes = recvfrom(serverSocket, buffer, sizeof(buffer), 0, (struct sockaddr *)&clientAddr6, &clientAddressLen);
+        }
+
+        if (bytes < 0)
+        {
+            printf("recv failed. Sender inactive.\n");
+            close(serverSocket);
+            return -1;
+        }
+
+        if (bytes < 0)
+        {
+            buffer[bytes] = '\0';
+            strncpy(decoded, buffer, sizeof(decoded));
+            if (strcmp(decoded, "END") == 0)
+            {
+                break;
+            }
+        }
+
+        memcpy(totalData + countbytes, buffer, bytes);
+        countbytes += bytes;
+    }
+
+    gettimeofday(&end, NULL);
+    unsigned long milliseconds = (end.tv_sec - start.tv_sec) * 1000 + (end.tv_usec - start.tv_usec) / 1000;
+
+    unsigned char calculated_hash[SHA_DIGEST_LENGTH];
+    SHA1((unsigned char *)totalData, strlen(totalData), calculated_hash);
+
+    for (int i = 0; i < SHA_DIGEST_LENGTH; i++)
+    {
+        if (calculated_hash[i] != recv_hash[i])
+        {
+            printf("Checksums don't match\n");
+            break;
+        }
+    }
+
+    if (type == IPV4)
+    {
+        printf("ipv4_udp,%lu\n", milliseconds);
+    }
+    else
+    {
+        printf("ipv6_udp,%lu\n", milliseconds);
+    }
+
+    close(serverSocket);
+    free(totalData);
     return 0;
 }
