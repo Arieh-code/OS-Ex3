@@ -1,11 +1,36 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <ctype.h>
+#include <sys/un.h>
+#include <sys/time.h>
+#include <sys/mman.h>
+#include <sys/types.h>
+#include <netinet/in.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <errno.h>
+#include <openssl/sha.h>
+
+enum addr
+{
+    IPV4,
+    IPV6
+};
+#define DATA_SIZE 100000000
+#define BUF_SIZE 64000
+#define TCP_BUF_SIZE 1000000
 
 void printUsage();
 void handleClient(int argc, char *argv[]);
 void handleServer(int argc, char *argv[]);
 int init_client(int argc, char *argv[]);
+int udp_client(int argc, char *argv[], enum addr type);
 
 int main(int argc, char *argv[])
 {
@@ -60,7 +85,7 @@ void handleClient(int argc, char *argv[])
             }
             else if (!strcmp(argv[6], "udp"))
             {
-                udp_client(argc, argv);
+                init_udp_client(argc, argv);
             }
         }
         else if (!strcmp(argv[5], "ipv6"))
@@ -71,7 +96,7 @@ void handleClient(int argc, char *argv[])
             }
             else if (!strcmp(argv[6], "udp"))
             {
-                udp_client(argc, argv);
+                init_udp_client(argc, argv);
             }
         }
         else if (!strcmp(argv[5], "uds"))
@@ -238,5 +263,157 @@ int init_client(int argc, char *argv[])
     }
 
     close(socket_fd);
+    return 0;
+}
+
+// function to run udp client communication
+/**
+ * Initializes a UDP client and sends data to a server.
+ *
+ * @param argc  The number of command line arguments.
+ * @param argv  The command line arguments.
+ * @param type  The address type (IPV4 or IPV6).
+ * @return      0 on success, -1 on error.
+ */
+int init_udp_client(int argc, char *argv[], enum addr type)
+{
+    char *serverType = (type == IPV4) ? "udp4" : "udp6";
+    send_type_to_server(argc, argv, serverType);
+
+    int sock = 0;
+    int sendStream = 0, totalSent = 0;
+    struct sockaddr_in servAddress4;
+    struct sockaddr_in6 servAddress6;
+    char buffer[BUF_SIZE] = {0};
+    struct timeval startTime, endTime;
+    const char *endMsg = "END";
+
+    // Create socket
+    if (type == IPV4)
+    {
+        sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (sock < 0)
+        {
+            printf("\nSocket creation error\n");
+            return -1;
+        }
+
+        memset(&servAddress4, 0, sizeof(servAddress4));
+
+        // Set socket address
+        servAddress4.sin_family = AF_INET;
+        servAddress4.sin_port = htons(atoi(argv[3]));
+
+        // Convert IPv4 and store in sin_addr
+        if (inet_pton(AF_INET, argv[2], &servAddress4.sin_addr) <= 0)
+        {
+            printf("\nInvalid address/Address not supported\n");
+            return -1;
+        }
+    }
+    else if (type == IPV6)
+    {
+        sock = socket(AF_INET6, SOCK_DGRAM, 0);
+        if (sock < 0)
+        {
+            printf("\nSocket creation error\n");
+            return -1;
+        }
+
+        memset(&servAddress6, 0, sizeof(servAddress6));
+
+        // Set socket address
+        servAddress6.sin6_family = AF_INET6;
+        servAddress6.sin6_port = htons(atoi(argv[3]));
+
+        // Convert IPv4 and store in sin_addr
+        if (inet_pton(AF_INET6, argv[2], &servAddress6.sin6_addr) <= 0)
+        {
+            printf("\nInvalid address/Address not supported\n");
+            return -1;
+        }
+    }
+    else
+    {
+        printf("Invalid address type\n");
+        return -1;
+    }
+
+    // Generate data
+    char *data = generate_rand_str(DATA_SIZE);
+
+    // Calculate and send checksum
+    unsigned char hash[SHA_DIGEST_LENGTH];
+    SHA1((unsigned char *)data, strlen(data), hash);
+    char hashStr[SHA_DIGEST_LENGTH * 2 + 1];
+    for (int i = 0; i < SHA_DIGEST_LENGTH; i++)
+    {
+        sprintf(&hashStr[i * 2], "%02x", hash[i]);
+    }
+    hashStr[SHA_DIGEST_LENGTH * 2] = '\0';
+
+    // Send checksum
+    if (type == IPV4)
+    {
+        sendStream = sendto(sock, hashStr, strlen(hashStr), 0, (struct sockaddr *)&servAddress4, sizeof(servAddress4));
+    }
+    else if (type == IPV6)
+    {
+        sendStream = sendto(sock, hashStr, strlen(hashStr), 0, (struct sockaddr *)&servAddress6, sizeof(servAddress6));
+    }
+    if (-1 == sendStream)
+    {
+        printf("send() failed");
+        exit(1);
+    }
+
+    gettimeofday(&startTime, 0);
+    int i = 0;
+    while (totalSent < strlen(data))
+    {
+        int bytesToSend = (BUF_SIZE < strlen(data) - totalSent) ? BUF_SIZE : (int)(strlen(data) - totalSent);
+        memcpy(buffer, data + totalSent, bytesToSend);
+        if (type == IPV4)
+        {
+            sendStream = sendto(sock, buffer, bytesToSend, 0, (struct sockaddr *)&servAddress4, sizeof(servAddress4));
+        }
+        else if (type == IPV6)
+        {
+            sendStream = sendto(sock, buffer, bytesToSend, 0, (struct sockaddr *)&servAddress6, sizeof(servAddress6));
+        }
+        if (-1 == sendStream)
+        {
+            printf("send() failed");
+            exit(1);
+        }
+
+        totalSent += sendStream;
+        if (i % 200 == 0 || bytesToSend < BUF_SIZE)
+        {
+            printf("Total bytes sent: %d\n", totalSent);
+        }
+
+        sendStream = 0;
+        i++;
+        memset(buffer, 0, sizeof(buffer));
+    }
+
+    gettimeofday(&endTime, 0);
+    strcpy(buffer, endMsg);
+    if (type == IPV4)
+    {
+        sendto(sock, buffer, strlen(buffer), 0, (struct sockaddr *)&servAddress4, sizeof(servAddress4));
+    }
+    else if (type == IPV6)
+    {
+        sendto(sock, buffer, strlen(buffer), 0, (struct sockaddr *)&servAddress6, sizeof(servAddress6));
+    }
+
+    unsigned long milliseconds = (endTime.tv_sec - startTime.tv_sec) * 1000 + (endTime.tv_usec - startTime.tv_usec) / 1000;
+    printf("Time elapsed: %lu milliseconds\n", milliseconds);
+
+    // Close socket
+    close(sock);
+    free(data);
     return 0;
 }
