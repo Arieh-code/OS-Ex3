@@ -36,7 +36,7 @@ enum addr
 // main functions
 // int client(int argc, char *argv[]);
 int server(int argc, char *argv[]);
-int init_tcp_client(int argc, char *argv[], enum addr type);
+int tcp_client(int argc, char *argv[], enum addr type); //////////////////
 int tcp_server(int argc, char *argv[], enum addr type);
 int init_udp_client(int argc, char *argv[], enum addr type);
 int init_udp_server(int argc, char *argv[], enum addr type);
@@ -1646,5 +1646,81 @@ int server(int argc, char *argv[])
             }
         }
     }
+    return 0;
+}
+
+int uds_stream_client(int argc, char *argv[])
+{
+    char *serverType = "udss";
+    send_type_to_server(argc, argv, serverType);
+
+    int sock = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (sock == -1)
+    {
+        printf("Failed to create client socket\n");
+        return -1;
+    }
+
+    struct sockaddr_un server_address = {0};
+    server_address.sun_family = AF_UNIX;
+    strncpy(server_address.sun_path, SOCKET_PATH, sizeof(server_address.sun_path) - 1);
+
+    if (connect(sock, (struct sockaddr *)&server_address, sizeof(struct sockaddr_un)) == -1)
+    {
+        perror("Failed to connect to server\n");
+        return -1;
+    }
+
+    printf("Connected to server\n");
+
+    char *data = generate_rand_str(DATA_SIZE);
+    unsigned char hash[SHA_DIGEST_LENGTH];
+    SHA1((unsigned char *)data, strlen(data), hash);
+
+    char hash_str[SHA_DIGEST_LENGTH * 2 + 1];
+    for (int i = 0; i < SHA_DIGEST_LENGTH; i++)
+    {
+        sprintf(&hash_str[i * 2], "%02x", hash[i]);
+    }
+    hash_str[SHA_DIGEST_LENGTH * 2] = '\0';
+
+    if (send(sock, hash_str, strlen(hash_str), 0) == -1)
+    {
+        printf("send() failed");
+        close(sock);
+        return -1;
+    }
+
+    struct timeval start, end;
+    gettimeofday(&start, 0);
+
+    int totalSent = 0;
+    char buffer[TCP_BUF_SIZE];
+    int sendStream = 0;
+
+    while (totalSent < strlen(data))
+    {
+        int bytes_to_read = TCP_BUF_SIZE < strlen(data) - totalSent ? TCP_BUF_SIZE : strlen(data) - totalSent;
+        memcpy(buffer, data + totalSent, bytes_to_read);
+
+        sendStream = send(sock, buffer, bytes_to_read, 0);
+        if (sendStream == -1)
+        {
+            printf("send() failed");
+            close(sock);
+            return -1;
+        }
+
+        totalSent += sendStream;
+        bzero(buffer, sizeof(buffer));
+    }
+
+    gettimeofday(&end, 0);
+    unsigned long milliseconds = (end.tv_sec - start.tv_sec) * 1000 + (end.tv_usec - start.tv_usec) / 1000;
+
+    printf("Total bytes sent: %d\nTime elapsed: %lu milliseconds\n", totalSent, milliseconds);
+
+    close(sock);
+    free(data);
     return 0;
 }
