@@ -1382,3 +1382,136 @@ int tcp_server(int argc, char *argv[], enum addr type)
     free(totalData);
     return 0;
 }
+
+int tcp_client(int argc, char *argv[], enum addr type)
+{
+    char *serverType;
+    if (type == IPV4)
+    {
+        serverType = "tcp4";
+    }
+    else
+    {
+        serverType = "tcp6";
+    }
+    send_type_to_server(argc, argv, serverType);
+
+    int socket_fd = 0;
+    int bytes_sent = 0, total_bytes_sent = 0;
+    char buffer[TCP_BUF_SIZE] = {0};
+    struct sockaddr_in server_addr_ipv4;
+    struct sockaddr_in6 server_addr_ipv6;
+    struct timeval start_time, end_time;
+
+    if (type == IPV4)
+    {
+        // Create socket
+        if ((socket_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+        {
+            printf("\nSocket creation error\n");
+            return -1;
+        }
+
+        memset(&server_addr_ipv4, 0, sizeof(server_addr_ipv4));
+
+        // Set socket address
+        server_addr_ipv4.sin_family = AF_INET;
+        server_addr_ipv4.sin_port = htons(atoi(argv[3]));
+
+        // Convert IPv4 and store in sin_addr
+        if (inet_pton(AF_INET, argv[2], &server_addr_ipv4.sin_addr) <= 0)
+        {
+            printf("\nInvalid address/Address not supported\n");
+            return -1;
+        }
+
+        // Connect to server socket
+        if (connect(socket_fd, (struct sockaddr *)&server_addr_ipv4, sizeof(server_addr_ipv4)) < 0)
+        {
+            perror("\nConnection failed\n");
+            return -1;
+        }
+    }
+    else if (type == IPV6)
+    {
+        // Create socket
+        if ((socket_fd = socket(AF_INET6, SOCK_STREAM, 0)) < 0)
+        {
+            printf("\nSocket creation error\n");
+            return -1;
+        }
+
+        memset(&server_addr_ipv6, '0', sizeof(server_addr_ipv6));
+
+        // Set socket address
+        server_addr_ipv6.sin6_family = AF_INET6;
+        server_addr_ipv6.sin6_port = htons(atoi(argv[3]));
+
+        // Convert IPv6 and store in sin6_addr
+        if (inet_pton(AF_INET6, argv[2], &server_addr_ipv6.sin6_addr) <= 0)
+        {
+            printf("\nInvalid address/Address not supported\n");
+            return -1;
+        }
+
+        // Connect to server socket
+        if (connect(socket_fd, (struct sockaddr *)&server_addr_ipv6, sizeof(server_addr_ipv6)) < 0)
+        {
+            printf("\nConnection failed\n");
+            return -1;
+        }
+    }
+    else
+    {
+        printf("Invalid address type\n");
+        return -1;
+    }
+
+    printf("Connected to server\n");
+
+    // Generate data
+    char *data = generate_rand_str(DATA_SIZE);
+
+    // Calculate and send checksum
+    unsigned char hash[SHA_DIGEST_LENGTH];
+    SHA1((unsigned char *)data, strlen(data), hash);
+    char hash_string[SHA_DIGEST_LENGTH * 2 + 1];
+    for (int i = 0; i < SHA_DIGEST_LENGTH; i++)
+    {
+        sprintf(&hash_string[i * 2], "%02x", hash[i]);
+    }
+    hash_string[SHA_DIGEST_LENGTH * 2] = '\0';
+    bytes_sent = send(socket_fd, hash_string, strlen(hash_string), 0);
+    if (-1 == bytes_sent)
+    {
+        printf("send() failed");
+        close(socket_fd);
+        exit(1);
+    }
+
+    gettimeofday(&start_time, 0);
+    while (total_bytes_sent < strlen(data))
+    {
+        int bytes_to_send = (TCP_BUF_SIZE < strlen(data) - total_bytes_sent) ? TCP_BUF_SIZE : strlen(data) - total_bytes_sent;
+        memcpy(buffer, data + total_bytes_sent, bytes_to_send);
+        bytes_sent = send(socket_fd, buffer, bytes_to_send, 0);
+        if (-1 == bytes_sent)
+        {
+            printf("send() failed");
+            exit(1);
+        }
+
+        total_bytes_sent += bytes_sent;
+        // printf("Bytes sent: %d\n", total_bytes_sent);
+        // printf("Bytes to send: %d\n", bytes_to_send);
+        bytes_sent = 0;
+        memset(buffer, 0, sizeof(buffer));
+    }
+    gettimeofday(&end_time, 0);
+    unsigned long milliseconds = (end_time.tv_sec - start_time.tv_sec) * 1000 + (end_time.tv_usec - start_time.tv_usec) / 1000;
+    printf("Total bytes sent: %d\nTime elapsed: %lu milliseconds\n", total_bytes_sent, milliseconds);
+    // Close socket
+    close(socket_fd);
+    free(data);
+    return 0;
+}
