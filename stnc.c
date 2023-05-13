@@ -1515,3 +1515,136 @@ int tcp_client(int argc, char *argv[], enum addr type)
     free(data);
     return 0;
 }
+
+int server(int argc, char *argv[])
+{
+    int server_socket, client_socket;
+    struct sockaddr_in server_address;
+    int option = 1;
+    char buffer[BUF_SIZE] = {0};
+    fd_set read_fds;
+
+    // Create socket file descriptor
+    if ((server_socket = socket(AF_INET, SOCK_STREAM, 0)) == 0)
+    {
+        perror("socket failed");
+        exit(EXIT_FAILURE);
+    }
+
+    // Attach socket to the port
+    if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR | 15, &option, sizeof(option)))
+    {
+        perror("setsockopt");
+        exit(EXIT_FAILURE);
+    }
+
+    server_address.sin_family = AF_INET;
+    server_address.sin_addr.s_addr = INADDR_ANY;
+    server_address.sin_port = htons(atoi(argv[2]));
+
+    if (bind(server_socket, (struct sockaddr *)&server_address, sizeof(server_address)) < 0)
+    {
+        perror("bind failed");
+        exit(EXIT_FAILURE);
+    }
+
+    if (listen(server_socket, 3) < 0)
+    {
+        perror("listen");
+        exit(EXIT_FAILURE);
+    }
+    printf("Server is listening on port %s\n", argv[2]);
+
+    // Accept and handle incoming connections
+    struct sockaddr_in client_address;
+    socklen_t client_address_len = sizeof(client_address);
+    memset(&client_address, 0, sizeof(client_address));
+    client_address_len = sizeof(client_address);
+    client_socket = accept(server_socket, (struct sockaddr *)&client_address, &client_address_len);
+    if (client_socket == -1)
+    {
+        printf("listen failed with error code : %d", errno);
+        close(server_socket);
+        close(client_socket);
+        return -1;
+    }
+    printf("Client connected: %s:%d\n", inet_ntoa(client_address.sin_addr), ntohs(client_address.sin_port));
+
+    while (1)
+    {
+        FD_ZERO(&read_fds);
+        FD_SET(server_socket, &read_fds);
+        FD_SET(client_socket, &read_fds);
+        FD_SET(STDIN_FILENO, &read_fds);
+        struct timeval timeout;
+        timeout.tv_sec = 10;
+        timeout.tv_usec = 0;
+
+        int max_fd = (server_socket > client_socket) ? server_socket : client_socket;
+        int result = select(max_fd + 1, &read_fds, NULL, NULL, &timeout);
+        if (result == -1)
+        {
+            perror("error in select");
+            exit(EXIT_FAILURE);
+        }
+        else if (result == 0)
+        {
+            continue;
+        }
+        else
+        {
+            if (FD_ISSET(STDIN_FILENO, &read_fds))
+            {
+                if (fgets(buffer, BUF_SIZE, stdin) == NULL)
+                {
+                    perror("error reading input");
+                    exit(EXIT_FAILURE);
+                }
+                int bytes_sent = send(client_socket, buffer, strlen(buffer), 0);
+                if (bytes_sent == -1)
+                {
+                    perror("error sending message");
+                    exit(EXIT_FAILURE);
+                }
+                /*
+                else
+                {
+                    printf("sent message to client: %s\n", message);
+                }
+                */
+            }
+
+            if (FD_ISSET(client_socket, &read_fds))
+            {
+                int bytes_received = read(client_socket, buffer, BUF_SIZE);
+                if (bytes_received == -1)
+                {
+                    perror("error receiving message");
+                    exit(EXIT_FAILURE);
+                }
+                else if (bytes_received == 0)
+                {
+                    // client closed the connection
+                    printf("Client disconnected\n");
+                    close(client_socket);
+                    FD_CLR(client_socket, &read_fds);
+                    client_socket = accept(server_socket, (struct sockaddr *)&client_address, &client_address_len);
+                    if (client_socket == -1)
+                    {
+                        printf("listen failed with error code : %d", errno);
+                        close(server_socket);
+                        close(client_socket);
+                        return -1;
+                    }
+                    printf("Client connected: %s:%d\n", inet_ntoa(client_address.sin_addr), ntohs(client_address.sin_port));
+                }
+                else
+                {
+                    buffer[bytes_received] = '\0';
+                    printf("Client message: %s", buffer);
+                }
+            }
+        }
+    }
+    return 0;
+}
