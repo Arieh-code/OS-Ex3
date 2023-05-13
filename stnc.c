@@ -113,22 +113,22 @@ void handleClient(int argc, char *argv[])
         {
             if (!strcmp(argv[6], "tcp"))
             {
-                tcp_client(argc, argv);
+                tcp_client(argc, argv, IPV4);
             }
             else if (!strcmp(argv[6], "udp"))
             {
-                init_udp_client(argc, argv);
+                init_udp_client(argc, argv, IPV4);
             }
         }
         else if (!strcmp(argv[5], "ipv6"))
         {
             if (!strcmp(argv[6], "tcp"))
             {
-                tcp_client(argc, argv);
+                tcp_client(argc, argv, IPV6);
             }
             else if (!strcmp(argv[6], "udp"))
             {
-                init_udp_client(argc, argv);
+                init_udp_client(argc, argv, IPV6);
             }
         }
         else if (!strcmp(argv[5], "uds"))
@@ -152,7 +152,6 @@ void handleClient(int argc, char *argv[])
         }
     }
 }
-
 void handleServer(int argc, char *argv[])
 {
     if (argv[3] != NULL)
@@ -1947,4 +1946,9 @@ char *generate_rand_str(int length)
     }
     string[length] = '\0';
     return string;
+}
+
+int min(int a, int b)
+{
+    return (a < b) ? a : b;
 }
