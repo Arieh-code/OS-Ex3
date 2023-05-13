@@ -159,19 +159,19 @@ void handleServer(int argc, char *argv[])
         char *serverType = getServerType(argc, argv);
         if (strcmp(serverType, "tcp4") == 0)
         {
-            tcp_server(argc, argv);
+            tcp_server(argc, argv, IPV4);
         }
         else if (strcmp(serverType, "tcp6") == 0)
         {
-            tcp_server(argc, argv);
+            tcp_server(argc, argv, IPV6);
         }
         else if (strcmp(serverType, "udp4") == 0)
         {
-            udp_server(argc, argv);
+            init_udp_server(argc, argv, IPV4);
         }
         else if (strcmp(serverType, "udp6") == 0)
         {
-            udp_server(argc, argv);
+            init_udp_server(argc, argv, IPV6);
         }
         else if (strcmp(serverType, "udss") == 0)
         {
