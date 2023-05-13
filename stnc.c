@@ -940,3 +940,132 @@ int mmap_client(int argc, char *argv[])
     send_type_to_server(argc, argv, serverType);
     return 0;
 }
+
+int mmap_server(int argc, char *argv[])
+{
+    // Retrieve shared memory object
+    struct timeval start, end;
+    gettimeofday(&start, NULL);
+
+    int shmFd = shm_open(SHM_FILE, O_RDONLY, 0666);
+    if (shmFd == -1)
+    {
+        perror("shm_open() failed\n");
+        return -1;
+    }
+
+    struct stat shmInfo;
+    if (fstat(shmFd, &shmInfo) == -1)
+    {
+        printf("fstat() failed\n");
+        return -1;
+    }
+
+    int shmSize = shmInfo.st_size;
+    void *shmAddr = mmap(NULL, shmSize, PROT_READ, MAP_SHARED, shmFd, 0);
+    close(shmFd);
+
+    if (shmAddr == MAP_FAILED)
+    {
+        printf("mmap() failed\n");
+        return -1;
+    }
+
+    // Copy data from shared memory
+    char *receivedData = malloc(shmSize);
+    char *pData = (char *)shmAddr;
+    for (int i = 0; i < shmSize; i++)
+    {
+        receivedData[i] = pData[i];
+    }
+
+    gettimeofday(&end, NULL);
+
+    // Retrieve and compare checksums
+    int shmChecksumFd = shm_open(SHM_FILE_CS, O_RDONLY, 0666);
+    if (shmChecksumFd == -1)
+    {
+        perror("shm_open() failed\n");
+        return -1;
+    }
+
+    struct stat checksumInfo;
+    if (fstat(shmChecksumFd, &checksumInfo) == -1)
+    {
+        printf("fstat() failed\n");
+        return -1;
+    }
+
+    int checksumSize = checksumInfo.st_size;
+    void *checksumAddr = mmap(NULL, checksumSize, PROT_READ, MAP_SHARED, shmChecksumFd, 0);
+
+    if (checksumAddr == MAP_FAILED)
+    {
+        printf("mmap() failed\n");
+        return -1;
+    }
+
+    close(shmChecksumFd);
+
+    unsigned char calculatedHash[SHA_DIGEST_LENGTH];
+    SHA1((unsigned char *)receivedData, strlen(receivedData), calculatedHash);
+    for (int i = 0; i < SHA_DIGEST_LENGTH; i++)
+    {
+        if (calculatedHash[i] != ((unsigned char *)checksumAddr)[i])
+        {
+            printf("Checksums don't match\n");
+            break;
+        }
+    }
+
+    shm_unlink(SHM_FILE);
+    shm_unlink(SHM_FILE_CS);
+    free(receivedData);
+
+    unsigned long milliseconds = (end.tv_sec - start.tv_sec) * 1000 + (end.tv_usec - start.tv_usec) / 1000;
+    printf("mmap,%lu\n", milliseconds);
+
+    munmap(shmAddr, shmSize);
+
+    // Remove file associated with shared memory
+    int shmNameFd = shm_open(SHM_FILE_NAME, O_RDONLY, 0666);
+    if (shmNameFd == -1)
+    {
+        perror("shm_open() failed\n");
+        return -1;
+    }
+
+    struct stat nameInfo;
+    if (fstat(shmNameFd, &nameInfo) == -1)
+    {
+        printf("fstat() failed\n");
+        return -1;
+    }
+
+    off_t nameSize = nameInfo.st_size;
+    void *nameAddr = mmap(NULL, nameSize, PROT_READ, MAP_SHARED, shmNameFd, 0);
+
+    if (nameAddr == MAP_FAILED)
+    {
+        printf("mmap() failed\n");
+        return -1;
+    }
+
+    close(shmNameFd);
+
+    int status = remove((char *)nameAddr);
+    if (status != 0)
+    {
+        printf("Unable to delete the file\n");
+    }
+
+    munmap(nameAddr, nameSize);
+
+    if (shm_unlink(SHM_FILE_NAME) == -1)
+    {
+        printf("shm_unlink() failed\n");
+        return -1;
+    }
+
+    return 0;
+}
