@@ -15,10 +15,10 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 
-#define TCP_BUF_SIZE 1024
-#define UDP_BUF_SIZE 1024
-#define UNIX_BUF_SIZE 1024
-#define DATA_SIZE 1024
+// #define TCP_BUF_SIZE 1024
+// #define UDP_BUF_SIZE 1024
+// #define UNIX_BUF_SIZE 1024
+// #define DATA_SIZE 1024
 #define UDS_PATH "stnc_socket"
 
 enum addr
