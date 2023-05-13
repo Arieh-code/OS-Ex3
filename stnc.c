@@ -28,11 +28,7 @@
 #define SOCKET_PATH "/tmp/my_socket.sock"
 #define SERVER_SOCKET_PATH "/tmp/uds_dgram_server"
 #define CLIENT_SOCKET_PATH "/tmp/uds_dgram_client"
-enum addr
-{
-    IPV4,
-    IPV6
-};
+
 
 int main(int argc, char *argv[])
 {
