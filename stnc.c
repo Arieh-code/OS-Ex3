@@ -1149,3 +1149,72 @@ int pipe_client(int argc, char *argv[])
     fclose(file_read);
     return 0;
 }
+
+int pipe_server(int argc, char *argv[])
+{
+    int fifoFileDescriptor, countBytes = 0;
+    char buf[TCP_BUF_SIZE], *totalData = malloc(DATA_SIZE);
+    struct timeval startTime, endTime;
+
+    mkfifo(FIFO_NAME, 0666);
+    fifoFileDescriptor = open(FIFO_NAME, O_RDONLY);
+    if (fifoFileDescriptor < 0)
+    {
+        fprintf(stderr, "Error: Could not open named pipe\n");
+        exit(1);
+    }
+
+    int bytesRead = 0;
+
+    // Get checksum from shared memory
+    int sharedMemoryChecksumFd = shm_open(SHM_FILE_CS, O_RDONLY, 0666);
+    if (sharedMemoryChecksumFd == -1)
+    {
+        perror("shm_open() failed\n");
+        return -1;
+    }
+    struct stat sharedMemoryChecksumStat;
+    if (fstat(sharedMemoryChecksumFd, &sharedMemoryChecksumStat) == -1)
+    {
+        printf("fstat() failed\n");
+        return -1;
+    }
+    int checksumLength = sharedMemoryChecksumStat.st_size;
+    void *checksumAddress = mmap(NULL, checksumLength, PROT_READ, MAP_SHARED, sharedMemoryChecksumFd, 0);
+    if (checksumAddress == MAP_FAILED)
+    {
+        printf("mmap() failed\n");
+        return -1;
+    }
+    close(sharedMemoryChecksumFd);
+
+    // Read from FIFO
+    gettimeofday(&startTime, 0);
+    while ((bytesRead = read(fifoFileDescriptor, buf, TCP_BUF_SIZE)) > 0)
+    {
+        memcpy(totalData + countBytes, buf, bytesRead);
+        countBytes += bytesRead;
+        // printf("TotalData size: %ld\n", strlen(totalData));
+    }
+    gettimeofday(&endTime, 0);
+
+    // Calculate and compare checksums
+    unsigned char calculatedHash[SHA_DIGEST_LENGTH];
+    SHA1((unsigned char *)totalData, strlen(totalData), calculatedHash);
+    for (int i = 0; i < SHA_DIGEST_LENGTH; i++)
+    {
+        if (calculatedHash[i] != ((unsigned char *)checksumAddress)[i])
+        {
+            printf("Checksums don't match\n");
+            break;
+        }
+    }
+
+    unsigned long milliseconds = (endTime.tv_sec - startTime.tv_sec) * 1000 + (endTime.tv_usec - startTime.tv_usec) / 1000;
+    printf("pipe,%lu\n", milliseconds);
+    close(fifoFileDescriptor);
+    unlink(FIFO_NAME);
+    shm_unlink(SHM_FILE_CS);
+    free(totalData);
+    return 0;
+}
