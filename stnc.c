@@ -860,3 +860,83 @@ int uds_dgram_server(int argc, char *argv[])
 
     return 0;
 }
+
+int mmap_client(int argc, char *argv[])
+{
+    char *serverType = "mmap";
+
+    // Generate file
+    char *data = generate_rand_str(DATA_SIZE);
+    int dataLen = strlen(data);
+
+    FILE *filePtr = fopen(argv[6], "w");
+    if (filePtr == NULL)
+    {
+        printf("Error opening file!\n");
+        return -1;
+    }
+    fprintf(filePtr, "%s", data);
+    fclose(filePtr);
+
+    int fd = open(argv[6], O_RDONLY);
+    if (fd == -1)
+    {
+        printf("open() failed\n");
+        return -1;
+    }
+
+    void *fileAddr = mmap(NULL, dataLen, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (fileAddr == MAP_FAILED)
+    {
+        printf("mmap() failed\n");
+        return -1;
+    }
+    close(fd);
+
+    // Calculate and save checksum
+    unsigned char hash[SHA_DIGEST_LENGTH];
+    SHA1((unsigned char *)data, strlen(data), hash);
+    free(data);
+
+    int shmFd = shm_open(SHM_FILE, O_CREAT | O_RDWR, 0666);
+    int shmFdName = shm_open(SHM_FILE_NAME, O_CREAT | O_RDWR, 0666);
+    int shmFdChecksum = shm_open(SHM_FILE_CS, O_CREAT | O_RDWR, 0666);
+    if (shmFd == -1 || shmFdName == -1 || shmFdChecksum == -1)
+    {
+        perror("shm_open() failed\n");
+        return -1;
+    }
+
+    int res = ftruncate(shmFd, dataLen);
+    int res2 = ftruncate(shmFdName, strlen(argv[6]));
+    int res3 = ftruncate(shmFdChecksum, sizeof(hash));
+    if (res == -1 || res2 == -1 || res3 == -1)
+    {
+        printf("ftruncate() failed\n");
+        return -1;
+    }
+
+    void *shmAddr = mmap(NULL, dataLen, PROT_WRITE, MAP_SHARED, shmFd, 0);
+    void *shmNameAddr = mmap(NULL, strlen(argv[6]), PROT_WRITE, MAP_SHARED, shmFdName, 0);
+    void *shmChecksumAddr = mmap(NULL, sizeof(hash), PROT_WRITE, MAP_SHARED, shmFdChecksum, 0);
+    if (shmAddr == MAP_FAILED || shmNameAddr == MAP_FAILED || shmChecksumAddr == MAP_FAILED)
+    {
+        printf("mmap() failed\n");
+        return -1;
+    }
+
+    memcpy(shmAddr, fileAddr, dataLen);
+    memcpy(shmNameAddr, argv[6], strlen(argv[6]));
+    memcpy(shmChecksumAddr, hash, sizeof(hash));
+
+    munmap(fileAddr, dataLen);
+    munmap(shmAddr, dataLen);
+    munmap(shmNameAddr, strlen(argv[6]));
+    munmap(shmChecksumAddr, sizeof(hash));
+    close(shmFd);
+    close(shmFdName);
+    close(shmFdChecksum);
+
+    send_type_to_server(argc, argv, serverType);
+    return 0;
+}
