@@ -16,6 +16,7 @@
 #include <sys/wait.h>
 #include <errno.h>
 #include <openssl/sha.h>
+#include "stnc.h"
 
 #define SHM_FILE "/FileSM"
 #define SHM_FILE_NAME "/FileName"
@@ -32,37 +33,6 @@ enum addr
     IPV4,
     IPV6
 };
-
-// main functions
-// int client(int argc, char *argv[]);
-int server(int argc, char *argv[]);
-int tcp_client(int argc, char *argv[], enum addr type); //////////////////
-int tcp_server(int argc, char *argv[], enum addr type);
-int init_udp_client(int argc, char *argv[], enum addr type);
-int init_udp_server(int argc, char *argv[], enum addr type);
-int uds_stream_client(int argc, char *argv[]);
-int uds_stream_server(int argc, char *argv[]);
-int uds_dgram_client(int argc, char *argv[]);
-int uds_dgram_server(int argc, char *argv[]);
-int mmap_client(int argc, char *argv[]);
-int mmap_server(int argc, char *argv[]);
-int pipe_client(int argc, char *argv[]);
-int pipe_server(int argc, char *argv[]);
-void printUsage();
-void handleClient(int argc, char *argv[]);
-void handleServer(int argc, char *argv[]);
-int init_client(int argc, char *argv[]);
-void send_checksum(char *data, int sock);
-char *generate_data(size_t size);
-int receive_checksum(int serverSocket, enum addr type, unsigned char *recv_hash);
-int bind_udp_server_socket(int serverSocket, enum addr type, const char *port);
-int create_udp_server_socket(int argc, char *argv[], enum addr type);
-
-// aid functions
-char *getServerType(int argc, char *argv[]);
-int send_type_to_server(int argc, char *argv[], char *type);
-char *generate_rand_str(int length);
-int min(int a, int b);
 
 int main(int argc, char *argv[])
 {
