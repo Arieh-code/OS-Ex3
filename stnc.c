@@ -762,3 +762,101 @@ int uds_dgram_client(int argc, char *argv[])
     unlink(CLIENT_SOCKET_PATH);
     return 0;
 }
+
+int uds_dgram_server(int argc, char *argv[])
+{
+    int server_fd;
+    struct sockaddr_un server_addr, client_addr;
+    socklen_t clientAddressLen;
+    int bytes = 0, countbytes = 0;
+    char buffer[BUF_SIZE] = {0};
+    char decoded[BUF_SIZE];
+    char *totalData = malloc(DATA_SIZE);
+    struct timeval start, end;
+
+    // Create server socket
+    if ((server_fd = socket(AF_UNIX, SOCK_DGRAM, 0)) == -1)
+    {
+        printf("Failed to create server socket\n");
+        return -1;
+    }
+
+    remove(SERVER_SOCKET_PATH);
+
+    // Initialize server address
+    memset(&server_addr, 0, sizeof(struct sockaddr_un));
+    server_addr.sun_family = AF_UNIX;
+    strncpy(server_addr.sun_path, SERVER_SOCKET_PATH, sizeof(server_addr.sun_path) - 1);
+
+    // Bind server socket to address
+    if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(struct sockaddr_un)) == -1)
+    {
+        printf("Failed to bind server socket to address\n");
+        return -1;
+    }
+
+    // Receive checksum
+    char hash_str[SHA_DIGEST_LENGTH * 2 + 1];
+    bytes = recvfrom(server_fd, hash_str, sizeof(hash_str), 0, (struct sockaddr *)&client_addr, &clientAddressLen);
+    if (bytes < 0)
+    {
+        printf("recv failed. Sender inactive.\n");
+        close(server_fd);
+        return -1;
+    }
+
+    unsigned char recv_hash[SHA_DIGEST_LENGTH];
+    for (int i = 0; i < SHA_DIGEST_LENGTH; i++)
+    {
+        sscanf(&hash_str[i * 2], "%2hhx", &recv_hash[i]);
+    }
+
+    // Receive data
+    gettimeofday(&start, NULL);
+    while (1)
+    {
+        bytes = recvfrom(server_fd, buffer, sizeof(buffer), 0, (struct sockaddr *)&client_addr, &clientAddressLen);
+        if (bytes < 0)
+        {
+            printf("recv failed. Sender inactive.\n");
+            close(server_fd);
+            return -1;
+        }
+
+        if (bytes < 10)
+        {
+            buffer[bytes] = '\0';
+            strncpy(decoded, buffer, sizeof(decoded));
+            if (strcmp(decoded, "END") == 0)
+            {
+                break;
+            }
+        }
+
+        memcpy(totalData + countbytes, buffer, bytes);
+        countbytes += bytes;
+    }
+
+    gettimeofday(&end, NULL);
+    unsigned long milliseconds = (end.tv_sec - start.tv_sec) * 1000 + (end.tv_usec - start.tv_usec) / 1000;
+
+    // Calculate checksum
+    unsigned char calculated_hash[SHA_DIGEST_LENGTH];
+    SHA1((unsigned char *)totalData, strlen(totalData), calculated_hash);
+    for (int i = 0; i < SHA_DIGEST_LENGTH; i++)
+    {
+        if (calculated_hash[i] != recv_hash[i])
+        {
+            printf("Checksums don't match\n");
+            break;
+        }
+    }
+
+    printf("uds_dgram,%lu\n", milliseconds);
+
+    close(server_fd);
+    free(totalData);
+    unlink(SERVER_SOCKET_PATH);
+
+    return 0;
+}
