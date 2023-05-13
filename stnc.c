@@ -1069,3 +1069,83 @@ int mmap_server(int argc, char *argv[])
 
     return 0;
 }
+
+int pipe_client(int argc, char *argv[])
+{
+    int pipe_fd;
+    char buffer[TCP_BUF_SIZE];
+    int bytes_read;
+    char *data = generate_rand_str(DATA_SIZE);
+
+    // Calculate and save checksum into shared memory
+    unsigned char hash[SHA_DIGEST_LENGTH];
+    SHA1((unsigned char *)data, strlen(data), hash);
+
+    int shm_fd_checksum = shm_open(SHM_FILE_CS, O_CREAT | O_RDWR, 0666);
+    if (shm_fd_checksum == -1)
+    {
+        perror("shm_open() failed\n");
+        return -1;
+    }
+
+    int res = ftruncate(shm_fd_checksum, sizeof(hash));
+    if (res == -1)
+    {
+        printf("ftruncate() failed\n");
+        return -1;
+    }
+
+    void *shm_checksum_addr = mmap(NULL, sizeof(hash), PROT_WRITE, MAP_SHARED, shm_fd_checksum, 0);
+    if (shm_checksum_addr == MAP_FAILED)
+    {
+        printf("mmap() failed\n");
+        return -1;
+    }
+    memcpy(shm_checksum_addr, &hash, sizeof(hash));
+    munmap(shm_checksum_addr, sizeof(hash));
+    close(shm_fd_checksum);
+
+    // Send type to server
+    send_type_to_server(argc, argv, "pipe");
+
+    // Open the named pipe for writing
+    pipe_fd = open(FIFO_NAME, O_WRONLY);
+    if (pipe_fd < 0)
+    {
+        perror("Error: Could not open named pipe\n");
+        exit(1);
+    }
+
+    // Write data to the named pipe
+    FILE *file_write = fopen(argv[6], "w");
+    if (file_write == NULL)
+    {
+        printf("Error opening file!\n");
+        return -1;
+    }
+    fprintf(file_write, "%s", data);
+    fclose(file_write);
+
+    FILE *file_read = fopen(argv[6], "r");
+    if (file_read == NULL)
+    {
+        printf("Error opening file!\n");
+        return -1;
+    }
+    while ((bytes_read = fread(buffer, 1, TCP_BUF_SIZE, file_read)) > 0)
+    {
+        if (write(pipe_fd, buffer, bytes_read) < 0)
+        {
+            fprintf(stderr, "Error: Could not write to named pipe\n");
+            exit(1);
+        }
+    }
+    if (remove(argv[6]) != 0)
+    {
+        printf("File %s was not deleted.\n", argv[6]);
+    }
+    close(pipe_fd);
+    free(data);
+    fclose(file_read);
+    return 0;
+}
