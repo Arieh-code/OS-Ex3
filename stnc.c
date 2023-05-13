@@ -674,3 +674,91 @@ int init_udp_server(int argc, char *argv[], enum addr type)
     free(totalData);
     return 0;
 }
+
+int uds_dgram_client(int argc, char *argv[])
+{
+    int sendStream = 0, totalSent = 0;
+    char buffer[BUF_SIZE] = {0};
+    struct timeval start, end;
+    char *serverType = "udsd";
+    char *endMsg = "END";
+    send_type_to_server(argc, argv, serverType);
+
+    int sock;
+    struct sockaddr_un server_addr, client_address;
+
+    // Create sending socket
+    if ((sock = socket(AF_UNIX, SOCK_DGRAM, 0)) == -1)
+    {
+        printf("Failed to create sending socket\n");
+        return -1;
+    }
+
+    memset(&server_addr, 0, sizeof(struct sockaddr_un));
+    server_addr.sun_family = AF_UNIX;
+    strncpy(server_addr.sun_path, SERVER_SOCKET_PATH, sizeof(server_addr.sun_path) - 1);
+
+    // Create receiving socket
+    memset(&client_address, 0, sizeof(struct sockaddr_un));
+    client_address.sun_family = AF_UNIX;
+    strncpy(client_address.sun_path, CLIENT_SOCKET_PATH, sizeof(client_address.sun_path) - 1);
+    remove(client_address.sun_path);
+
+    printf("Client started\n");
+
+    // Generate data
+    char *data = generate_rand_str(DATA_SIZE);
+
+    // Calculate and send checksum
+    unsigned char hash[SHA_DIGEST_LENGTH];
+    SHA1((unsigned char *)data, strlen(data), hash);
+    char hash_str[SHA_DIGEST_LENGTH * 2 + 1];
+    for (int i = 0; i < SHA_DIGEST_LENGTH; i++)
+    {
+        sprintf(&hash_str[i * 2], "%02x", hash[i]);
+    }
+    hash_str[SHA_DIGEST_LENGTH * 2] = '\0';
+
+    sendStream = sendto(sock, hash_str, strlen(hash_str), 0, (struct sockaddr *)&server_addr, sizeof(server_addr));
+    if (sendStream == -1)
+    {
+        printf("send() failed\n");
+        return -1;
+    }
+
+    // Send data
+    int i = 0;
+    gettimeofday(&start, 0);
+    while (totalSent < strlen(data))
+    {
+        int bytes_to_send = (BUF_SIZE < strlen(data) - totalSent) ? BUF_SIZE : strlen(data) - totalSent;
+        memcpy(buffer, data + totalSent, bytes_to_send);
+
+        sendStream = sendto(sock, buffer, bytes_to_send, 0, (struct sockaddr *)&server_addr, sizeof(server_addr));
+        if (sendStream == -1)
+        {
+            printf("send() failed\n");
+            return -1;
+        }
+
+        totalSent += sendStream;
+        if (i % 200 == 0 || bytes_to_send < BUF_SIZE)
+        {
+            printf("Total bytes sent: %d\n", totalSent);
+        }
+        i++;
+
+        bzero(buffer, sizeof(buffer));
+    }
+
+    gettimeofday(&end, 0);
+    strcpy(buffer, endMsg);
+    sendto(sock, buffer, strlen(buffer), 0, (struct sockaddr *)&server_addr, sizeof(server_addr));
+    unsigned long milliseconds = (end.tv_sec - start.tv_sec) * 1000 + (end.tv_usec - start.tv_usec) / 1000;
+    printf("Total bytes sent: %d\nTime elapsed: %lu milliseconds\n", totalSent, milliseconds);
+
+    // Close socket and clean up
+    close(sock);
+    unlink(CLIENT_SOCKET_PATH);
+    return 0;
+}
