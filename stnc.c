@@ -1218,3 +1218,167 @@ int pipe_server(int argc, char *argv[])
     free(totalData);
     return 0;
 }
+
+int tcp_server(int argc, char *argv[], enum addr type)
+{
+    int serverSocket, clientSocket;
+    struct sockaddr_in serverAddress, clientAddress;
+    struct sockaddr_in6 serverAddress6, clientAddress6;
+    socklen_t clientAddressLen;
+    int option = 1, bytes = -1, totalBytes = 0;
+    char receiveBuffer[TCP_BUF_SIZE] = {0};
+    char *totalData = malloc(DATA_SIZE);
+    struct timeval startTime, endTime;
+
+    if (type == IPV4)
+    {
+        // Create server socket
+        if ((serverSocket = socket(AF_INET, SOCK_STREAM, 0)) == -1)
+        {
+            printf("\nSocket creation error\n");
+            return -1;
+        }
+
+        memset(&serverAddress, 0, sizeof(serverAddress));
+        memset(&clientAddress, 0, sizeof(clientAddress));
+        clientAddressLen = sizeof(clientAddress);
+
+        // Set socket address
+        serverAddress.sin_family = AF_INET;
+        serverAddress.sin_addr.s_addr = INADDR_ANY;
+        serverAddress.sin_port = htons(atoi(argv[2]));
+
+        // Set socket options
+        if (setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, &option, sizeof(option)))
+        {
+            printf("\nSetsockopt error\n");
+            return -1;
+        }
+
+        // Bind socket to address
+        if (bind(serverSocket, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0)
+        {
+            perror("\nTCP bind failed\n");
+            return -1;
+        }
+    }
+    else if (type == IPV6)
+    {
+        // Create server socket
+        if ((serverSocket = socket(AF_INET6, SOCK_STREAM, 0)) == -1)
+        {
+            printf("\nSocket creation error\n");
+            return -1;
+        }
+
+        memset(&serverAddress6, 0, sizeof(serverAddress6));
+        memset(&clientAddress6, 0, sizeof(clientAddress6));
+        clientAddressLen = sizeof(clientAddress6);
+
+        // Set socket address
+        serverAddress6.sin6_family = AF_INET6;
+        serverAddress6.sin6_addr = in6addr_any;
+        serverAddress6.sin6_port = htons(atoi(argv[2]));
+
+        // Set socket options
+        if (setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, &option, sizeof(option)))
+        {
+            printf("\nSetsockopt error\n");
+            return -1;
+        }
+
+        // Bind socket to address
+        if (bind(serverSocket, (struct sockaddr *)&serverAddress6, sizeof(serverAddress6)) < 0)
+        {
+            printf("\nTCP bind failed\n");
+            return -1;
+        }
+    }
+    else
+    {
+        printf("Invalid address type\n");
+        return -1;
+    }
+
+    // Listen for incoming connections
+    if (listen(serverSocket, 3) < 0)
+    {
+        printf("\nListen error\n");
+        return -1;
+    }
+    if (type == IPV4)
+    {
+        if ((clientSocket = accept(serverSocket, (struct sockaddr *)&clientAddress, &clientAddressLen)) < 0)
+        {
+            printf("\nAccept error\n");
+            return -1;
+        }
+    }
+    else if (type == IPV6)
+    {
+        if ((clientSocket = accept(serverSocket, (struct sockaddr *)&clientAddress6, &clientAddressLen)) < 0)
+        {
+            printf("\nAccept error\n");
+            return -1;
+        }
+    }
+
+    // Receive checksum
+    char receivedHashStr[SHA_DIGEST_LENGTH * 2 + 1];
+    bytes = recv(clientSocket, receivedHashStr, sizeof(receivedHashStr), 0);
+    if (bytes < 0)
+    {
+        printf("Recv failed. Sender inactive.\n");
+        close(serverSocket);
+        close(clientSocket);
+        return -1;
+    }
+    unsigned char receivedHash[SHA_DIGEST_LENGTH];
+    for (int i = 0; i < SHA_DIGEST_LENGTH; i++)
+    {
+        sscanf(&receivedHashStr[i * 2], "%2hhx", &receivedHash[i]);
+    }
+
+    gettimeofday(&startTime, 0);
+    while (bytes != 0)
+    {
+        if ((bytes = recv(clientSocket, receiveBuffer, sizeof(receiveBuffer), 0)) < 0)
+        {
+            printf("Recv failed. Sender inactive.\n");
+            // close(serverSocket);
+            // close(clientSocket);
+            return -1;
+        }
+        memcpy(totalData + totalBytes, receiveBuffer, bytes);
+        totalBytes += bytes;
+    }
+    gettimeofday(&endTime, 0);
+    unsigned long milliseconds = (endTime.tv_sec - startTime.tv_sec) * 1000 + (endTime.tv_usec - startTime.tv_usec) / 1000;
+
+    // Calculate checksum
+    unsigned char calculatedHash[SHA_DIGEST_LENGTH];
+    SHA1((unsigned char *)totalData, strlen(totalData), calculatedHash);
+    for (int i = 0; i < SHA_DIGEST_LENGTH; i++)
+    {
+        if (calculatedHash[i] != receivedHash[i])
+        {
+            printf("Checksums don't match\n");
+            break;
+        }
+    }
+
+    if (type == IPV4)
+    {
+        printf("ipv4_tcp,%lu\n", milliseconds);
+    }
+    else
+    {
+        printf("ipv6_tcp,%lu\n", milliseconds);
+    }
+
+    // Close server socket
+    close(serverSocket);
+    close(clientSocket);
+    free(totalData);
+    return 0;
+}
